@@ -58,16 +58,91 @@ button, input, textarea {
 }
 
 /* ---------------- ambient background ---------------- */
+/* Sky colors are driven by CSS variables that app.js swaps based on the
+   real time of day (night / dawn / day / dusk). A constant dark scrim
+   sits over the sky so text stays readable at every phase. */
+
+body {
+  --sky-top: #1B1035;
+  --sky-mid: #3D1E56;
+  --sky-bottom: #7C3F61;
+  --orb-a-color: rgba(255, 155, 133, 0.35);
+  --orb-b-color: rgba(124, 63, 97, 0.55);
+  --orb-c-color: rgba(255, 199, 180, 0.22);
+  --star-opacity: 0.5;
+  --scrim-opacity: 0.32;
+  --glyph-glow: rgba(255, 155, 133, 0.45);
+  transition: background 1.2s ease;
+}
+
+/* Dawn — 5:00–8:00: night indigo breaking into a peach horizon */
+body[data-time-phase="dawn"] {
+  --sky-top: #241a3f;
+  --sky-mid: #7a4763;
+  --sky-bottom: #f0a375;
+  --orb-a-color: rgba(255, 178, 133, 0.4);
+  --orb-b-color: rgba(154, 90, 107, 0.5);
+  --orb-c-color: rgba(255, 214, 170, 0.3);
+  --star-opacity: 0.18;
+  --glyph-glow: rgba(255, 190, 140, 0.5);
+}
+
+/* Day — 8:00–17:00: soft dusty sky, still deep enough for cream text */
+body[data-time-phase="day"] {
+  --sky-top: #33507a;
+  --sky-mid: #4f7fa8;
+  --sky-bottom: #dfc27f;
+  --orb-a-color: rgba(255, 226, 173, 0.35);
+  --orb-b-color: rgba(90, 130, 168, 0.45);
+  --orb-c-color: rgba(255, 255, 255, 0.18);
+  --star-opacity: 0;
+  --scrim-opacity: 0.4;
+  --glyph-glow: rgba(255, 214, 140, 0.55);
+}
+
+/* Dusk — 17:00–21:00: amber light sinking back toward night */
+body[data-time-phase="dusk"] {
+  --sky-top: #221231;
+  --sky-mid: #6a2f52;
+  --sky-bottom: #e2794f;
+  --orb-a-color: rgba(255, 140, 105, 0.42);
+  --orb-b-color: rgba(120, 45, 75, 0.55);
+  --orb-c-color: rgba(255, 170, 130, 0.25);
+  --star-opacity: 0.3;
+  --glyph-glow: rgba(255, 150, 110, 0.5);
+}
+
+/* Night — 21:00–5:00: the original deep aurora sky */
+body[data-time-phase="night"] {
+  --sky-top: #1B1035;
+  --sky-mid: #3D1E56;
+  --sky-bottom: #7C3F61;
+  --orb-a-color: rgba(255, 155, 133, 0.35);
+  --orb-b-color: rgba(124, 63, 97, 0.55);
+  --orb-c-color: rgba(255, 199, 180, 0.22);
+  --star-opacity: 0.5;
+  --scrim-opacity: 0.32;
+  --glyph-glow: rgba(255, 155, 133, 0.45);
+}
 
 .sky {
   position: fixed;
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(120% 90% at 15% -10%, #2a1748 0%, transparent 55%),
-    radial-gradient(100% 80% at 100% 0%, #4a2456 0%, transparent 50%),
-    linear-gradient(160deg, var(--midnight) 0%, var(--plum) 55%, var(--rose) 100%);
+    radial-gradient(120% 90% at 15% -10%, color-mix(in srgb, var(--sky-mid) 70%, black) 0%, transparent 55%),
+    radial-gradient(100% 80% at 100% 0%, var(--sky-mid) 0%, transparent 50%),
+    linear-gradient(160deg, var(--sky-top) 0%, var(--sky-mid) 55%, var(--sky-bottom) 100%);
   overflow: hidden;
+  transition: background 1.2s ease;
+}
+
+.sky::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 4, 26, var(--scrim-opacity));
+  transition: background 1.2s ease;
 }
 
 .orb {
@@ -76,26 +151,27 @@ button, input, textarea {
   filter: blur(60px);
   opacity: 0.55;
   will-change: transform;
+  transition: background 1.2s ease;
 }
 
 .orb-a {
   width: 42vw; height: 42vw;
   top: -10%; left: -8%;
-  background: radial-gradient(circle, rgba(255, 155, 133, 0.35), transparent 70%);
+  background: radial-gradient(circle, var(--orb-a-color), transparent 70%);
   animation: drift-a 26s ease-in-out infinite;
 }
 
 .orb-b {
   width: 36vw; height: 36vw;
   bottom: -12%; right: -6%;
-  background: radial-gradient(circle, rgba(124, 63, 97, 0.55), transparent 70%);
+  background: radial-gradient(circle, var(--orb-b-color), transparent 70%);
   animation: drift-b 32s ease-in-out infinite;
 }
 
 .orb-c {
   width: 26vw; height: 26vw;
   top: 40%; left: 60%;
-  background: radial-gradient(circle, rgba(255, 199, 180, 0.22), transparent 70%);
+  background: radial-gradient(circle, var(--orb-c-color), transparent 70%);
   animation: drift-c 22s ease-in-out infinite;
 }
 
@@ -116,7 +192,8 @@ button, input, textarea {
   position: absolute;
   inset: 0;
   background-repeat: repeat;
-  opacity: 0.5;
+  opacity: var(--star-opacity);
+  transition: opacity 1.2s ease;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -159,7 +236,9 @@ button, input, textarea {
 .brand-mark {
   font-size: 30px;
   color: var(--coral-soft);
-  filter: drop-shadow(0 0 14px rgba(255, 155, 133, 0.45));
+  filter: drop-shadow(0 0 14px var(--glyph-glow, rgba(255, 155, 133, 0.45)));
+  transition: filter 1.2s ease;
+  display: inline-block;
 }
 
 .brand-text h1 {
@@ -373,6 +452,7 @@ button, input, textarea {
   flex: 1;
   display: -webkit-box;
   -webkit-line-clamp: 5;
+  line-clamp: 5;
   -webkit-box-orient: vertical;
   overflow: hidden;
   position: relative;

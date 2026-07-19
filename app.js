@@ -485,6 +485,37 @@ function deleteRemote(id) {
 }
 
 // ---------------------------------------------------------------
+// time-of-day sky
+// ---------------------------------------------------------------
+
+const brandMarkEl = document.querySelector(".brand-mark");
+
+function getTimePhase(date = new Date()) {
+  const h = date.getHours();
+  if (h >= 5 && h < 8) return "dawn";
+  if (h >= 8 && h < 17) return "day";
+  if (h >= 17 && h < 21) return "dusk";
+  return "night";
+}
+
+const PHASE_GLYPH = {
+  dawn: "🌅",
+  day: "☀",
+  dusk: "🌇",
+  night: "☾",
+};
+
+let currentPhase = null;
+
+function applyTimePhase() {
+  const phase = getTimePhase();
+  if (phase === currentPhase) return;
+  currentPhase = phase;
+  document.body.dataset.timePhase = phase;
+  if (brandMarkEl) brandMarkEl.textContent = PHASE_GLYPH[phase];
+}
+
+// ---------------------------------------------------------------
 // starfield (tiny decorative dots, generated once)
 // ---------------------------------------------------------------
 
@@ -510,6 +541,8 @@ function paintStars() {
 // ---------------------------------------------------------------
 
 function init() {
+  applyTimePhase();
+  setInterval(applyTimePhase, 5 * 60 * 1000); // recheck every 5 min in case the app stays open
   paintStars();
   render();
 
