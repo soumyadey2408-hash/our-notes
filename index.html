@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Aurora — notes for us</title>
+<meta name="description" content="A private, glassy little notes app for the two of us." />
+<meta name="theme-color" content="#1B1035" />
+
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="icon" href="icon-192.png" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,340;0,9..144,500;0,9..144,600;1,9..144,440&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ambient background -->
+<div class="sky" aria-hidden="true">
+  <div class="orb orb-a"></div>
+  <div class="orb orb-b"></div>
+  <div class="orb orb-c"></div>
+  <div class="stars" id="stars"></div>
+</div>
+
+<div class="app">
+
+  <!-- header -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">☾</span>
+      <div class="brand-text">
+        <h1>Aurora</h1>
+        <p class="brand-sub">a little sky of notes, just for us</p>
+      </div>
+    </div>
+
+    <div class="topbar-actions">
+      <label class="search" role="search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input id="searchInput" type="text" placeholder="Search your notes…" autocomplete="off" />
+      </label>
+
+      <button class="icon-btn" id="syncBtn" title="Sync status" aria-label="Sync status">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 15a5 5 0 004.75 5H16a4.5 4.5 0 001-8.89A5.5 5.5 0 007 10.05" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="dot" id="syncDot"></span>
+      </button>
+
+      <button class="new-note-btn" id="newNoteBtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        New note
+      </button>
+    </div>
+  </header>
+
+  <!-- sync banner -->
+  <div class="banner" id="syncBanner" hidden>
+    <p id="syncBannerText"></p>
+    <button id="syncBannerAction" class="banner-link"></button>
+    <button class="banner-close" id="syncBannerClose" aria-label="Dismiss">✕</button>
+  </div>
+
+  <!-- notes grid -->
+  <main class="board" id="board" aria-live="polite">
+    <!-- note cards injected here -->
+  </main>
+
+  <!-- empty state -->
+  <div class="empty" id="emptyState" hidden>
+    <div class="empty-glyph">✦</div>
+    <h2>Nothing here yet</h2>
+    <p>Write the first note. A thought, a plan, a reason you smiled today.</p>
+    <button class="new-note-btn" id="emptyNewNoteBtn">Write a note</button>
+  </div>
+
+</div>
+
+<!-- editor modal -->
+<div class="modal-scrim" id="modalScrim" hidden>
+  <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="editorTitleLabel">
+    <div class="modal-head">
+      <input id="noteTitleInput" class="note-title-input" placeholder="Give it a title…" maxlength="120" />
+      <button class="icon-btn pin-toggle" id="pinToggle" title="Pin this note" aria-label="Pin note">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2l1.8 5.6L19.5 9l-4.6 3.4L16.3 18 12 14.8 7.7 18l1.4-5.6L4.5 9l5.7-1.4L12 2z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+
+    <textarea id="noteContentInput" class="note-content-input" placeholder="Start writing…"></textarea>
+
+    <div class="modal-foot">
+      <div class="color-picker" id="colorPicker" role="radiogroup" aria-label="Note color"></div>
+
+      <div class="modal-buttons">
+        <button class="text-btn" id="deleteNoteBtn" hidden>Delete</button>
+        <button class="text-btn" id="cancelBtn">Cancel</button>
+        <button class="new-note-btn" id="saveNoteBtn">Save note</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- sync setup modal -->
+<div class="modal-scrim" id="syncModalScrim" hidden>
+  <div class="modal glass sync-modal" role="dialog" aria-modal="true">
+    <h2 id="editorTitleLabel">Sync across your devices</h2>
+    <p class="sync-copy">Give your shared space a code. Enter the same code on both your phones to see each other's notes update in real time.</p>
+
+    <label class="field-label">Shared code</label>
+    <div class="code-row">
+      <input id="roomCodeInput" class="room-code-input" placeholder="e.g. moonlight-42" maxlength="40" autocomplete="off" />
+      <button class="text-btn" id="generateCodeBtn">Generate one</button>
+    </div>
+
+    <div class="modal-buttons sync-modal-buttons">
+      <button class="text-btn" id="staySoloBtn">Keep this device only</button>
+      <button class="new-note-btn" id="connectBtn">Connect</button>
+    </div>
+
+    <p class="sync-fineprint" id="syncFineprint"></p>
+  </div>
+</div>
+
+<!-- toast -->
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
