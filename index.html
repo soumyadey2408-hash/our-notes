@@ -60,12 +60,27 @@
         <span class="dot" id="lockDot"></span>
       </button>
 
+      <button class="icon-btn" id="namesBtn" title="Section names" aria-label="Rename your sections">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="9" cy="8" r="3" stroke="currentColor" stroke-width="1.7"/>
+          <circle cx="17" cy="9.5" r="2.4" stroke="currentColor" stroke-width="1.7"/>
+          <path d="M3.2 19c.6-3 3-5 5.8-5s5.2 2 5.8 5M14.6 19c.4-2.1 1.7-3.8 3.5-4.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+      </button>
+
       <button class="new-note-btn" id="newNoteBtn">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
         New note
       </button>
     </div>
   </header>
+
+  <!-- owner filter tabs -->
+  <div class="owner-tabs" id="ownerTabs">
+    <button type="button" class="owner-tab active" data-owner="all">All</button>
+    <button type="button" class="owner-tab" data-owner="a">Me</button>
+    <button type="button" class="owner-tab" data-owner="b">Them</button>
+  </div>
 
   <!-- sync banner -->
   <div class="banner" id="syncBanner" hidden>
@@ -110,6 +125,12 @@
       <input type="file" id="photoInput" accept="image/*" multiple hidden />
     </div>
 
+    <div class="owner-picker" id="ownerPicker">
+      <span class="field-label" style="margin:0 2px 0 0;">Whose note:</span>
+      <button type="button" class="owner-pill" data-owner="a">Me</button>
+      <button type="button" class="owner-pill" data-owner="b">Them</button>
+    </div>
+
     <div class="modal-foot">
       <div class="color-picker" id="colorPicker" role="radiogroup" aria-label="Note color"></div>
 
@@ -143,6 +164,25 @@
   </div>
 </div>
 
+
+<!-- section names modal -->
+<div class="modal-scrim" id="namesModalScrim" hidden>
+  <div class="modal glass sync-modal" role="dialog" aria-modal="true">
+    <h2>Your two sections</h2>
+    <p class="sync-copy">Give each of you a name. Notes get tagged to one of you, so you can filter to see just one side.</p>
+
+    <label class="field-label">Your name</label>
+    <input id="ownerAInput" class="room-code-input" maxlength="24" placeholder="e.g. Me" autocomplete="off" />
+
+    <label class="field-label" style="margin-top:14px;">Their name</label>
+    <input id="ownerBInput" class="room-code-input" maxlength="24" placeholder="e.g. Priya" autocomplete="off" />
+
+    <div class="modal-buttons sync-modal-buttons">
+      <button class="text-btn" id="cancelNamesBtn">Cancel</button>
+      <button class="new-note-btn" id="saveNamesBtn">Save names</button>
+    </div>
+  </div>
+</div>
 
 <!-- lock settings modal -->
 <div class="modal-scrim" id="lockModalScrim" hidden>
@@ -216,6 +256,12 @@
       <button data-key="back" aria-label="Backspace">⌫</button>
     </div>
   </div>
+</div>
+
+<!-- photo lightbox -->
+<div class="lightbox" id="lightbox" hidden>
+  <button class="lightbox-close" id="lightboxClose" aria-label="Close">✕</button>
+  <img id="lightboxImg" src="" alt="" />
 </div>
 
 <!-- toast -->
