@@ -468,6 +468,31 @@ body[data-time-phase="night"] {
   position: relative;
 }
 
+.quick-assign {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--glass-border);
+  font-size: 11px;
+  color: var(--cream-faint);
+  position: relative;
+}
+.quick-assign button {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.15);
+  color: var(--cream-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+.quick-assign button:hover {
+  border-color: var(--glass-border-hover);
+  color: var(--cream);
+}
+
 .card-actions {
   display: flex;
   gap: 6px;
