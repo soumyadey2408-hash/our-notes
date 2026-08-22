@@ -7,6 +7,9 @@ import { firebaseConfig } from "./firebase-config.js";
 
 const STORAGE_KEY = "aurora-notes-v1";
 const ROOM_KEY = "aurora-room-code";
+const LOCK_KEY = "aurora-lock-v1";
+const UNLOCK_SESSION_KEY = "aurora-unlocked";
+const LOCK_GRACE_MS = 30 * 1000; // re-ask for the PIN after being backgrounded this long
 
 const COLORS = [
   { id: "none",     hex: "transparent" },
@@ -35,6 +38,11 @@ let syncState = "off"; // off | connecting | on | error
 let roomCode = localStorage.getItem(ROOM_KEY) || "";
 let firestoreUnsub = null;
 let db = null;
+
+let draftPhotos = []; // [{ id, dataUrl }] for the note currently open in the editor
+let appStarted = false;
+let pinBuffer = "";
+let lockBackgroundTimer = null;
 
 const isConfigured = () =>
   firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith("YOUR_");
@@ -75,6 +83,34 @@ const bannerClose = document.getElementById("syncBannerClose");
 
 const toastEl = document.getElementById("toast");
 
+const photoStrip = document.getElementById("photoStrip");
+const addPhotoBtn = document.getElementById("addPhotoBtn");
+const photoInput = document.getElementById("photoInput");
+
+const lockDot = document.getElementById("lockDot");
+const lockSettingsBtn = document.getElementById("lockSettingsBtn");
+const lockModalScrim = document.getElementById("lockModalScrim");
+const lockSetupView = document.getElementById("lockSetupView");
+const lockManageView = document.getElementById("lockManageView");
+const newPinInput = document.getElementById("newPinInput");
+const confirmPinInput = document.getElementById("confirmPinInput");
+const biometricRow = document.getElementById("biometricRow");
+const biometricToggle = document.getElementById("biometricToggle");
+const biometricRowManage = document.getElementById("biometricRowManage");
+const biometricToggleManage = document.getElementById("biometricToggleManage");
+const lockSetupError = document.getElementById("lockSetupError");
+const changePinBtn = document.getElementById("changePinBtn");
+const removeLockBtn = document.getElementById("removeLockBtn");
+const cancelLockBtn = document.getElementById("cancelLockBtn");
+const saveLockBtn = document.getElementById("saveLockBtn");
+
+const lockScreen = document.getElementById("lockScreen");
+const lockScreenSub = document.getElementById("lockScreenSub");
+const pinDots = document.getElementById("pinDots");
+const lockError = document.getElementById("lockError");
+const biometricBtn = document.getElementById("biometricBtn");
+const keypad = document.getElementById("keypad");
+
 // ---------------------------------------------------------------
 // local storage
 // ---------------------------------------------------------------
@@ -89,7 +125,12 @@ function loadLocalNotes() {
 }
 
 function saveLocalNotes() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+  } catch (err) {
+    console.error(err);
+    showToast("Storage is full — try removing some photos or old notes");
+  }
 }
 
 // ---------------------------------------------------------------
@@ -152,7 +193,15 @@ function render() {
         card.style.borderColor = `${color.hex}55`;
       }
 
+      const photos = note.photos || [];
       card.innerHTML = `
+        ${
+          photos.length
+            ? `<div class="card-photos"><img src="${photos[0].dataUrl}" alt="" />${
+                photos.length > 1 ? `<span class="card-photos-count">+${photos.length - 1}</span>` : ""
+              }</div>`
+            : ""
+        }
         <div class="note-card-top">
           <h3>${escapeHtml(note.title) || "Untitled"}</h3>
           ${note.pinned ? '<span class="pin-mark">✦</span>' : ""}
@@ -215,6 +264,83 @@ function buildColorPicker() {
 }
 buildColorPicker();
 
+// ---------------------------------------------------------------
+// photos
+// ---------------------------------------------------------------
+
+function resizeImage(file, maxDim = 1400, quality = 0.72) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round(height * (maxDim / width));
+            width = maxDim;
+          } else {
+            width = Math.round(width * (maxDim / height));
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = () => reject(new Error("Couldn't read that image"));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error("Couldn't read that file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderPhotoStrip() {
+  photoStrip.innerHTML = "";
+  if (draftPhotos.length === 0) {
+    photoStrip.hidden = true;
+    return;
+  }
+  photoStrip.hidden = false;
+  draftPhotos.forEach((p) => {
+    const wrap = document.createElement("div");
+    wrap.className = "photo-thumb";
+    wrap.innerHTML = `<img src="${p.dataUrl}" alt="" /><button type="button" class="photo-remove" data-id="${p.id}" aria-label="Remove photo">✕</button>`;
+    photoStrip.appendChild(wrap);
+  });
+}
+
+photoStrip.addEventListener("click", (e) => {
+  const btn = e.target.closest(".photo-remove");
+  if (!btn) return;
+  draftPhotos = draftPhotos.filter((p) => p.id !== btn.dataset.id);
+  renderPhotoStrip();
+});
+
+addPhotoBtn.addEventListener("click", () => photoInput.click());
+
+photoInput.addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  for (const file of files) {
+    try {
+      const dataUrl = await resizeImage(file);
+      draftPhotos.push({ id: crypto.randomUUID(), dataUrl });
+    } catch (err) {
+      console.error(err);
+      showToast("Couldn't add one of those photos");
+    }
+  }
+  renderPhotoStrip();
+  photoInput.value = "";
+});
+
+// ---------------------------------------------------------------
+// editor open/close
+// ---------------------------------------------------------------
+
 function openEditor(noteId) {
   activeNoteId = noteId || null;
   const note = notes.find((n) => n.id === noteId);
@@ -223,6 +349,8 @@ function openEditor(noteId) {
   contentInput.value = note ? note.content : "";
   selectedColor = note ? note.color || "none" : "none";
   pinnedDraft = note ? !!note.pinned : false;
+  draftPhotos = note && note.photos ? note.photos.map((p) => ({ ...p })) : [];
+  renderPhotoStrip();
 
   [...colorPicker.children].forEach((el) =>
     el.classList.toggle("selected", el.dataset.color === selectedColor)
@@ -237,12 +365,13 @@ function openEditor(noteId) {
 function closeEditor() {
   modalScrim.hidden = true;
   activeNoteId = null;
+  draftPhotos = [];
 }
 
 function saveNote() {
   const title = titleInput.value.trim();
   const content = contentInput.value.trim();
-  if (!title && !content) {
+  if (!title && !content && draftPhotos.length === 0) {
     closeEditor();
     return;
   }
@@ -254,6 +383,7 @@ function saveNote() {
     note.content = content;
     note.color = selectedColor;
     note.pinned = pinnedDraft;
+    note.photos = draftPhotos;
     note.updatedAt = now;
     pushRemote(note);
     showToast("Note updated");
@@ -264,6 +394,7 @@ function saveNote() {
       content,
       color: selectedColor,
       pinned: pinnedDraft,
+      photos: draftPhotos,
       createdAt: now,
       updatedAt: now,
     };
@@ -485,6 +616,345 @@ function deleteRemote(id) {
 }
 
 // ---------------------------------------------------------------
+// app lock (PIN + optional device biometrics)
+// ---------------------------------------------------------------
+// Stored locally only: a salted SHA-256 hash of the PIN, never the PIN
+// itself. Biometrics use the device's own platform authenticator
+// (Face ID / fingerprint / Windows Hello) purely as a local unlock
+// gate — there's no server here to verify the signature against, the
+// same way a phone's own lock screen doesn't "verify" with anyone.
+
+function getLockConfig() {
+  try {
+    const raw = localStorage.getItem(LOCK_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function setLockConfig(cfg) {
+  localStorage.setItem(LOCK_KEY, JSON.stringify(cfg));
+}
+
+function clearLockConfig() {
+  localStorage.removeItem(LOCK_KEY);
+}
+
+function randomHex(byteLength) {
+  const arr = crypto.getRandomValues(new Uint8Array(byteLength));
+  return [...arr].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function hashPin(pin, saltHex) {
+  const data = new TextEncoder().encode(saltHex + ":" + pin);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function biometricAvailable() {
+  if (!window.PublicKeyCredential || !PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable) {
+    return false;
+  }
+  try {
+    return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+  } catch {
+    return false;
+  }
+}
+
+function bufToBase64(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+function base64ToBuf(b64) {
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer;
+}
+
+async function registerBiometric() {
+  const cred = await navigator.credentials.create({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rp: { name: "Aurora Notes" },
+      user: {
+        id: crypto.getRandomValues(new Uint8Array(16)),
+        name: "aurora-user",
+        displayName: "Aurora",
+      },
+      pubKeyCredParams: [
+        { alg: -7, type: "public-key" },
+        { alg: -257, type: "public-key" },
+      ],
+      authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
+      timeout: 60000,
+    },
+  });
+  return cred ? bufToBase64(cred.rawId) : null;
+}
+
+async function verifyBiometric(credentialIdBase64) {
+  const assertion = await navigator.credentials.get({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      allowCredentials: [{ id: base64ToBuf(credentialIdBase64), type: "public-key" }],
+      userVerification: "required",
+      timeout: 60000,
+    },
+  });
+  return !!assertion;
+}
+
+function updateLockDot() {
+  lockDot.className = "dot " + (getLockConfig() ? "on" : "off");
+}
+
+// -- lock settings modal --
+
+async function openLockModal() {
+  const cfg = getLockConfig();
+  newPinInput.value = "";
+  confirmPinInput.value = "";
+  lockSetupError.hidden = true;
+
+  const canBiometric = await biometricAvailable();
+
+  if (cfg) {
+    lockSetupView.hidden = true;
+    lockManageView.hidden = false;
+    removeLockBtn.hidden = false;
+    saveLockBtn.textContent = "Done";
+    biometricRowManage.hidden = !canBiometric;
+    biometricToggleManage.checked = !!cfg.credentialId;
+  } else {
+    lockSetupView.hidden = false;
+    lockManageView.hidden = true;
+    removeLockBtn.hidden = true;
+    saveLockBtn.textContent = "Turn on lock";
+    biometricRow.hidden = !canBiometric;
+    biometricToggle.checked = false;
+  }
+
+  lockModalScrim.hidden = false;
+  if (!cfg) setTimeout(() => newPinInput.focus(), 30);
+}
+
+function closeLockModal() {
+  lockModalScrim.hidden = true;
+}
+
+function showChangePinView() {
+  lockManageView.hidden = true;
+  lockSetupView.hidden = false;
+  newPinInput.value = "";
+  confirmPinInput.value = "";
+  lockSetupError.hidden = true;
+  saveLockBtn.textContent = "Update PIN";
+  setTimeout(() => newPinInput.focus(), 30);
+}
+
+lockSettingsBtn.addEventListener("click", openLockModal);
+cancelLockBtn.addEventListener("click", closeLockModal);
+changePinBtn.addEventListener("click", showChangePinView);
+lockModalScrim.addEventListener("click", (e) => {
+  if (e.target === lockModalScrim) closeLockModal();
+});
+
+saveLockBtn.addEventListener("click", async () => {
+  // Manage view with no PIN change in progress — just persist the biometric toggle.
+  if (!lockManageView.hidden) {
+    const cfg = getLockConfig();
+    if (!cfg) return closeLockModal();
+
+    if (biometricToggleManage.checked && !cfg.credentialId) {
+      try {
+        const credentialId = await registerBiometric();
+        cfg.credentialId = credentialId;
+        setLockConfig(cfg);
+        showToast("Biometric unlock turned on");
+      } catch (err) {
+        console.error(err);
+        biometricToggleManage.checked = false;
+        showToast("Couldn't set up biometrics on this device");
+      }
+    } else if (!biometricToggleManage.checked && cfg.credentialId) {
+      cfg.credentialId = null;
+      setLockConfig(cfg);
+    }
+    closeLockModal();
+    return;
+  }
+
+  // Setup / change-PIN view.
+  const pin = newPinInput.value.trim();
+  const confirm = confirmPinInput.value.trim();
+
+  if (!/^\d{4,8}$/.test(pin)) {
+    lockSetupError.textContent = "PIN must be 4–8 digits.";
+    lockSetupError.hidden = false;
+    return;
+  }
+  if (pin !== confirm) {
+    lockSetupError.textContent = "PINs don't match.";
+    lockSetupError.hidden = false;
+    return;
+  }
+
+  const saltHex = randomHex(16);
+  const hashHex = await hashPin(pin, saltHex);
+  const existing = getLockConfig();
+  const cfg = {
+    saltHex,
+    hashHex,
+    length: pin.length,
+    credentialId: existing ? existing.credentialId : null,
+  };
+
+  if (!existing && biometricToggle.checked) {
+    try {
+      cfg.credentialId = await registerBiometric();
+    } catch (err) {
+      console.error(err);
+      showToast("Couldn't set up biometrics — PIN lock is still on");
+    }
+  }
+
+  setLockConfig(cfg);
+  sessionStorage.setItem(UNLOCK_SESSION_KEY, "1"); // don't immediately re-lock the device that just set this up
+  updateLockDot();
+  closeLockModal();
+  showToast(existing ? "PIN updated" : "App lock turned on");
+});
+
+removeLockBtn.addEventListener("click", () => {
+  clearLockConfig();
+  sessionStorage.removeItem(UNLOCK_SESSION_KEY);
+  updateLockDot();
+  closeLockModal();
+  showToast("App lock turned off");
+});
+
+// -- lock screen --
+
+function setPinDots(count) {
+  pinDots.innerHTML = "";
+  const total = Math.max(count, 4);
+  for (let i = 0; i < total; i++) {
+    const dot = document.createElement("span");
+    if (i < count) dot.classList.add("filled");
+    pinDots.appendChild(dot);
+  }
+}
+
+function shakeAndClear(message) {
+  lockError.textContent = message;
+  lockError.hidden = false;
+  pinDots.classList.add("shake");
+  setTimeout(() => pinDots.classList.remove("shake"), 400);
+  pinBuffer = "";
+  setPinDots(0);
+}
+
+async function tryUnlockWithPin() {
+  const cfg = getLockConfig();
+  if (!cfg) return;
+  const hash = await hashPin(pinBuffer, cfg.saltHex);
+  if (hash === cfg.hashHex) {
+    unlockApp();
+  } else {
+    shakeAndClear("Wrong PIN — try again");
+  }
+}
+
+keypad.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-key]");
+  if (!btn) return;
+  const key = btn.dataset.key;
+  const cfg = getLockConfig();
+  if (!cfg) return;
+
+  lockError.hidden = true;
+
+  if (key === "back") {
+    pinBuffer = pinBuffer.slice(0, -1);
+    setPinDots(pinBuffer.length);
+    return;
+  }
+
+  if (pinBuffer.length >= cfg.length) return;
+  pinBuffer += key;
+  setPinDots(pinBuffer.length);
+
+  if (pinBuffer.length === cfg.length) {
+    tryUnlockWithPin();
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (lockScreen.hidden) return;
+  if (/^\d$/.test(e.key)) {
+    keypad.querySelector(`button[data-key="${e.key}"]`)?.click();
+  } else if (e.key === "Backspace") {
+    keypad.querySelector('button[data-key="back"]')?.click();
+  }
+});
+
+biometricBtn.addEventListener("click", attemptBiometricUnlock);
+
+async function attemptBiometricUnlock() {
+  const cfg = getLockConfig();
+  if (!cfg || !cfg.credentialId) return;
+  try {
+    const ok = await verifyBiometric(cfg.credentialId);
+    if (ok) unlockApp();
+  } catch (err) {
+    console.error(err);
+    // user cancelled or it failed — they can fall back to the PIN pad
+  }
+}
+
+function showLockScreen(auto = true) {
+  const cfg = getLockConfig();
+  if (!cfg) return;
+  pinBuffer = "";
+  setPinDots(0);
+  lockError.hidden = true;
+  lockScreenSub.textContent = cfg.credentialId ? "Enter your PIN or use biometrics" : "Enter your PIN to continue";
+  biometricBtn.hidden = !cfg.credentialId;
+  lockScreen.hidden = false;
+  if (auto && cfg.credentialId) attemptBiometricUnlock();
+}
+
+function hideLockScreen() {
+  lockScreen.hidden = true;
+}
+
+function unlockApp() {
+  hideLockScreen();
+  sessionStorage.setItem(UNLOCK_SESSION_KEY, "1");
+  if (!appStarted) {
+    appStarted = true;
+    completeInit();
+  }
+}
+
+// Re-lock after the app has been backgrounded for a while, WhatsApp-style.
+document.addEventListener("visibilitychange", () => {
+  const cfg = getLockConfig();
+  if (!cfg) return;
+
+  if (document.hidden) {
+    clearTimeout(lockBackgroundTimer);
+    lockBackgroundTimer = setTimeout(() => {
+      sessionStorage.removeItem(UNLOCK_SESSION_KEY);
+    }, LOCK_GRACE_MS);
+  } else {
+    clearTimeout(lockBackgroundTimer);
+    if (sessionStorage.getItem(UNLOCK_SESSION_KEY) !== "1") {
+      showLockScreen();
+    }
+  }
+});
+
+// ---------------------------------------------------------------
 // time-of-day sky
 // ---------------------------------------------------------------
 
@@ -540,10 +1010,7 @@ function paintStars() {
 // init
 // ---------------------------------------------------------------
 
-function init() {
-  applyTimePhase();
-  setInterval(applyTimePhase, 5 * 60 * 1000); // recheck every 5 min in case the app stays open
-  paintStars();
+function completeInit() {
   render();
 
   if (isConfigured() && roomCode) {
@@ -554,6 +1021,23 @@ function init() {
       "Working on this device only. Connect a free Firebase project to sync notes between your phones.";
     bannerAction.textContent = "How to set it up";
     bannerAction.addEventListener("click", openSyncModal);
+  }
+}
+
+function init() {
+  applyTimePhase();
+  setInterval(applyTimePhase, 5 * 60 * 1000); // recheck every 5 min in case the app stays open
+  paintStars();
+  updateLockDot();
+
+  const cfg = getLockConfig();
+  const alreadyUnlocked = sessionStorage.getItem(UNLOCK_SESSION_KEY) === "1";
+
+  if (cfg && !alreadyUnlocked) {
+    showLockScreen();
+  } else {
+    appStarted = true;
+    completeInit();
   }
 
   if ("serviceWorker" in navigator) {
