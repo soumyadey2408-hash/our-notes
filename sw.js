@@ -1,4 +1,4 @@
-const CACHE_NAME = "aurora-notes-v1";
+const CACHE_NAME = "aurora-notes-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
