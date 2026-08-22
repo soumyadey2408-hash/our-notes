@@ -39,6 +39,7 @@ let searchTerm = "";
 let syncState = "off"; // off | connecting | on | error
 let roomCode = localStorage.getItem(ROOM_KEY) || "";
 let firestoreUnsub = null;
+let ownerNamesUnsub = null;
 let db = null;
 
 let draftPhotos = []; // [{ id, dataUrl }] for the note currently open in the editor
@@ -193,6 +194,7 @@ function visibleNotes() {
 
 function render() {
   const list = visibleNotes();
+  const names = getOwnerNames();
   board.innerHTML = "";
 
   if (list.length === 0) {
@@ -235,6 +237,15 @@ function render() {
             </button>
           </div>
         </div>
+        ${
+          !note.owner
+            ? `<div class="quick-assign">
+                <span>Tag as</span>
+                <button type="button" data-action="assign" data-value="a">${escapeHtml(names.a)}</button>
+                <button type="button" data-action="assign" data-value="b">${escapeHtml(names.b)}</button>
+              </div>`
+            : ""
+        }
       `;
 
       card.addEventListener("click", (e) => {
@@ -246,6 +257,17 @@ function render() {
         if (e.target.closest('[data-action="preview"]')) {
           e.stopPropagation();
           openLightbox(photos[0].dataUrl);
+          return;
+        }
+        const assignBtn = e.target.closest('[data-action="assign"]');
+        if (assignBtn) {
+          e.stopPropagation();
+          note.owner = assignBtn.dataset.value;
+          note.updatedAt = Date.now();
+          saveLocalNotes();
+          pushRemote(note);
+          render();
+          showToast(`Tagged as ${getOwnerNames()[assignBtn.dataset.value]}`);
           return;
         }
         openEditor(note.id);
@@ -446,8 +468,11 @@ saveNamesBtn.addEventListener("click", () => {
   const b = ownerBInput.value.trim() || "Them";
   setOwnerNames({ a, b });
   applyOwnerNames();
+  pushOwnerNames();
   namesModalScrim.hidden = true;
-  showToast("Section names updated");
+  showToast(
+    syncState === "on" ? "Section names updated — synced to both phones" : "Section names updated on this device"
+  );
 });
 
 // ---------------------------------------------------------------
@@ -712,6 +737,28 @@ async function connectSync() {
       }
     );
 
+    // keep "Me"/"Them" section names in sync between both phones
+    const namesRef = doc(collection(db, "rooms", roomCode, "meta"), "ownerNames");
+    if (ownerNamesUnsub) ownerNamesUnsub();
+
+    ownerNamesUnsub = onSnapshot(
+      namesRef,
+      (snap) => {
+        if (snap.exists()) {
+          const remote = snap.data();
+          const local = getOwnerNames();
+          if (remote.a !== local.a || remote.b !== local.b) {
+            setOwnerNames({ a: remote.a, b: remote.b });
+            applyOwnerNames();
+          }
+        } else {
+          // nothing shared yet — publish this device's names as the starting point
+          pushOwnerNames();
+        }
+      },
+      (err) => console.error("owner name sync error", err)
+    );
+
     // push any notes that existed only locally up to the room
     notes.forEach((n) => pushRemote(n));
 
@@ -729,6 +776,16 @@ function pushRemote(note) {
   const { doc, setDoc, collection } = window.__aurora;
   const ref = doc(collection(db, "rooms", roomCode, "notes"), note.id);
   setDoc(ref, note).catch((err) => console.error("sync push failed", err));
+}
+
+function pushOwnerNames() {
+  if (syncState !== "on" || !db || !window.__aurora) return;
+  const { doc, setDoc, collection } = window.__aurora;
+  const ref = doc(collection(db, "rooms", roomCode, "meta"), "ownerNames");
+  const names = getOwnerNames();
+  setDoc(ref, { ...names, updatedAt: Date.now() }).catch((err) =>
+    console.error("owner name push failed", err)
+  );
 }
 
 function deleteRemote(id) {
