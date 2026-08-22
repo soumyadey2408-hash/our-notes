@@ -83,9 +83,31 @@ green when connected.
   Delete.
 - **Pin** — the pin icon inside the editor keeps a note at the top.
 - **Color tag** — pick a soft color at the bottom of the editor.
+- **Photos** — "Add photos" inside the editor lets you attach one or
+  more images to a note. They're resized before saving so they don't
+  eat up storage.
 - **Search** — the search bar filters by title and content as you
   type.
 - **Save shortcut** — ⌘/Ctrl + Enter while writing a note.
+
+## App lock (PIN + biometrics)
+
+Tap the lock icon in the header to turn on a passcode. Once it's on,
+Aurora asks for the PIN every time the app is opened (and again if
+it's been backgrounded for more than 30 seconds) — the same pattern
+apps like WhatsApp use.
+
+- Anyone can set any 4–8 digit PIN. It's stored locally as a salted
+  hash, never in plain text.
+- If your device supports Face ID, fingerprint, or Windows Hello,
+  you can also turn on "Also allow biometrics" in the lock settings.
+  That uses your device's own authenticator as a local unlock gate —
+  since this app has no server, it's the same trust model as your
+  phone's own lock screen, not something a server verifies.
+- "Turn off lock" in the lock settings removes the PIN entirely.
+- The PIN and lock setting live in this browser's local storage, so
+  they're per-device — the lock (like everything else) doesn't sync
+  between your two phones.
 
 ## Making it feel more like "yours"
 
