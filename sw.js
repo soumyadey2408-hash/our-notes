@@ -1,52 +1,272 @@
-const CACHE_NAME = "aurora-notes-v2";
-const APP_SHELL = [
-  "./",
-  "./index.html",
-  "./style.css",
-  "./app.js",
-  "./firebase-config.js",
-  "./manifest.json",
-  "./icon-192.png",
-  "./icon-512.png",
-];
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Aurora — notes for us</title>
+<meta name="description" content="A private, glassy little notes app for the two of us." />
+<meta name="theme-color" content="#1B1035" />
 
-self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
-  );
-  self.skipWaiting();
-});
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="icon" href="icon-192.png" />
 
-self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
-      )
-    )
-  );
-  self.clients.claim();
-});
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,340;0,9..144,500;0,9..144,600;1,9..144,440&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-self.addEventListener("fetch", (event) => {
-  const url = new URL(event.request.url);
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
 
-  // Never cache cross-origin calls (Firebase, fonts) — let the network
-  // handle those directly so cloud sync always stays live.
-  if (url.origin !== self.location.origin) return;
+<!-- ambient background -->
+<div class="sky" aria-hidden="true">
+  <div class="orb orb-a"></div>
+  <div class="orb orb-b"></div>
+  <div class="orb orb-c"></div>
+  <div class="stars" id="stars"></div>
+</div>
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const network = fetch(event.request)
-        .then((response) => {
-          if (response && response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          }
-          return response;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
-  );
-});
+<div class="app">
+
+  <!-- header -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">☾</span>
+      <div class="brand-text">
+        <h1>Aurora</h1>
+        <p class="brand-sub">a little sky of notes, just for us</p>
+      </div>
+    </div>
+
+    <div class="topbar-actions">
+      <label class="search" role="search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input id="searchInput" type="text" placeholder="Search your notes…" autocomplete="off" />
+      </label>
+
+      <button class="icon-btn" id="syncBtn" title="Sync status" aria-label="Sync status">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 15a5 5 0 004.75 5H16a4.5 4.5 0 001-8.89A5.5 5.5 0 007 10.05" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="dot" id="syncDot"></span>
+      </button>
+
+      <button class="icon-btn" id="lockSettingsBtn" title="App lock" aria-label="App lock settings">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M8 11V8a4 4 0 018 0v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <span class="dot" id="lockDot"></span>
+      </button>
+
+      <button class="icon-btn" id="namesBtn" title="Section names" aria-label="Rename your sections">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="9" cy="8" r="3" stroke="currentColor" stroke-width="1.7"/>
+          <circle cx="17" cy="9.5" r="2.4" stroke="currentColor" stroke-width="1.7"/>
+          <path d="M3.2 19c.6-3 3-5 5.8-5s5.2 2 5.8 5M14.6 19c.4-2.1 1.7-3.8 3.5-4.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+      </button>
+
+      <button class="new-note-btn" id="newNoteBtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        New note
+      </button>
+    </div>
+  </header>
+
+  <!-- owner filter tabs -->
+  <div class="owner-tabs" id="ownerTabs">
+    <button type="button" class="owner-tab active" data-owner="all">All</button>
+    <button type="button" class="owner-tab" data-owner="a">Me</button>
+    <button type="button" class="owner-tab" data-owner="b">Them</button>
+  </div>
+
+  <!-- sync banner -->
+  <div class="banner" id="syncBanner" hidden>
+    <p id="syncBannerText"></p>
+    <button id="syncBannerAction" class="banner-link"></button>
+    <button class="banner-close" id="syncBannerClose" aria-label="Dismiss">✕</button>
+  </div>
+
+  <!-- notes grid -->
+  <main class="board" id="board" aria-live="polite">
+    <!-- note cards injected here -->
+  </main>
+
+  <!-- empty state -->
+  <div class="empty" id="emptyState" hidden>
+    <div class="empty-glyph">✦</div>
+    <h2>Nothing here yet</h2>
+    <p>Write the first note. A thought, a plan, a reason you smiled today.</p>
+    <button class="new-note-btn" id="emptyNewNoteBtn">Write a note</button>
+  </div>
+
+</div>
+
+<!-- editor modal -->
+<div class="modal-scrim" id="modalScrim" hidden>
+  <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="editorTitleLabel">
+    <div class="modal-head">
+      <input id="noteTitleInput" class="note-title-input" placeholder="Give it a title…" maxlength="120" />
+      <button class="icon-btn pin-toggle" id="pinToggle" title="Pin this note" aria-label="Pin note">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2l1.8 5.6L19.5 9l-4.6 3.4L16.3 18 12 14.8 7.7 18l1.4-5.6L4.5 9l5.7-1.4L12 2z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+
+    <textarea id="noteContentInput" class="note-content-input" placeholder="Start writing…"></textarea>
+
+    <div class="photo-strip" id="photoStrip" hidden></div>
+    <div class="photo-add-row">
+      <button type="button" class="text-btn photo-add-btn" id="addPhotoBtn">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.7"/><circle cx="8.5" cy="10" r="1.6" fill="currentColor"/><path d="M21 16l-5.5-5.5a2 2 0 00-2.8 0L4 19" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Add photos
+      </button>
+      <input type="file" id="photoInput" accept="image/*" multiple hidden />
+    </div>
+
+    <div class="owner-picker" id="ownerPicker">
+      <span class="field-label" style="margin:0 2px 0 0;">Whose note:</span>
+      <button type="button" class="owner-pill" data-owner="a">Me</button>
+      <button type="button" class="owner-pill" data-owner="b">Them</button>
+    </div>
+
+    <div class="modal-foot">
+      <div class="color-picker" id="colorPicker" role="radiogroup" aria-label="Note color"></div>
+
+      <div class="modal-buttons">
+        <button class="text-btn" id="deleteNoteBtn" hidden>Delete</button>
+        <button class="text-btn" id="cancelBtn">Cancel</button>
+        <button class="new-note-btn" id="saveNoteBtn">Save note</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- sync setup modal -->
+<div class="modal-scrim" id="syncModalScrim" hidden>
+  <div class="modal glass sync-modal" role="dialog" aria-modal="true">
+    <h2 id="editorTitleLabel">Sync across your devices</h2>
+    <p class="sync-copy">Give your shared space a code. Enter the same code on both your phones to see each other's notes update in real time.</p>
+
+    <label class="field-label">Shared code</label>
+    <div class="code-row">
+      <input id="roomCodeInput" class="room-code-input" placeholder="e.g. moonlight-42" maxlength="40" autocomplete="off" />
+      <button class="text-btn" id="generateCodeBtn">Generate one</button>
+    </div>
+
+    <div class="modal-buttons sync-modal-buttons">
+      <button class="text-btn" id="staySoloBtn">Keep this device only</button>
+      <button class="new-note-btn" id="connectBtn">Connect</button>
+    </div>
+
+    <p class="sync-fineprint" id="syncFineprint"></p>
+  </div>
+</div>
+
+
+<!-- section names modal -->
+<div class="modal-scrim" id="namesModalScrim" hidden>
+  <div class="modal glass sync-modal" role="dialog" aria-modal="true">
+    <h2>Your two sections</h2>
+    <p class="sync-copy">Give each of you a name. Notes get tagged to one of you, so you can filter to see just one side.</p>
+
+    <label class="field-label">Your name</label>
+    <input id="ownerAInput" class="room-code-input" maxlength="24" placeholder="e.g. Me" autocomplete="off" />
+
+    <label class="field-label" style="margin-top:14px;">Their name</label>
+    <input id="ownerBInput" class="room-code-input" maxlength="24" placeholder="e.g. Priya" autocomplete="off" />
+
+    <div class="modal-buttons sync-modal-buttons">
+      <button class="text-btn" id="cancelNamesBtn">Cancel</button>
+      <button class="new-note-btn" id="saveNamesBtn">Save names</button>
+    </div>
+  </div>
+</div>
+
+<!-- lock settings modal -->
+<div class="modal-scrim" id="lockModalScrim" hidden>
+  <div class="modal glass sync-modal" role="dialog" aria-modal="true">
+    <h2>App lock</h2>
+
+    <div id="lockSetupView">
+      <p class="sync-copy">Require a PIN — and your device's biometrics, if available — every time Aurora opens.</p>
+
+      <label class="field-label">Choose a PIN (4–8 digits)</label>
+      <input id="newPinInput" class="room-code-input pin-text-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="New PIN" autocomplete="off" />
+
+      <label class="field-label" style="margin-top:14px;">Confirm PIN</label>
+      <input id="confirmPinInput" class="room-code-input pin-text-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="Confirm PIN" autocomplete="off" />
+
+      <label class="biometric-row" id="biometricRow" hidden>
+        <input type="checkbox" id="biometricToggle" />
+        <span>Also allow Face ID / fingerprint / device unlock</span>
+      </label>
+
+      <p class="lock-modal-error" id="lockSetupError" hidden></p>
+    </div>
+
+    <div id="lockManageView" hidden>
+      <p class="sync-copy">App lock is on — Aurora asks for your PIN every time it's opened.</p>
+
+      <label class="biometric-row" id="biometricRowManage" hidden>
+        <input type="checkbox" id="biometricToggleManage" />
+        <span>Also allow Face ID / fingerprint / device unlock</span>
+      </label>
+
+      <button class="text-btn" id="changePinBtn" style="padding-left:0;">Change PIN</button>
+    </div>
+
+    <div class="modal-buttons sync-modal-buttons">
+      <button class="text-btn" id="removeLockBtn" hidden>Turn off lock</button>
+      <button class="text-btn" id="cancelLockBtn">Cancel</button>
+      <button class="new-note-btn" id="saveLockBtn">Turn on lock</button>
+    </div>
+  </div>
+</div>
+
+<!-- lock screen -->
+<div class="lock-screen" id="lockScreen" hidden>
+  <div class="lock-inner glass">
+    <div class="lock-glyph">☾</div>
+    <h2>Aurora is locked</h2>
+    <p class="lock-sub" id="lockScreenSub">Enter your PIN to continue</p>
+
+    <div class="pin-dots" id="pinDots"></div>
+
+    <p class="lock-error" id="lockError" hidden></p>
+
+    <button class="biometric-btn" id="biometricBtn" hidden>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 11v2M8.5 15.5c1-1 2.2-1.5 3.5-1.5s2.5.5 3.5 1.5M6.5 12.5C7.5 10 9.5 8.5 12 8.5s4.5 1.5 5.5 4M4.7 9.8C6 6.4 8.7 4.5 12 4.5s6 1.9 7.3 5.3M12 15.5v2.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Use biometrics
+    </button>
+
+    <div class="keypad" id="keypad">
+      <button data-key="1">1</button>
+      <button data-key="2">2</button>
+      <button data-key="3">3</button>
+      <button data-key="4">4</button>
+      <button data-key="5">5</button>
+      <button data-key="6">6</button>
+      <button data-key="7">7</button>
+      <button data-key="8">8</button>
+      <button data-key="9">9</button>
+      <span></span>
+      <button data-key="0">0</button>
+      <button data-key="back" aria-label="Backspace">⌫</button>
+    </div>
+  </div>
+</div>
+
+<!-- photo lightbox -->
+<div class="lightbox" id="lightbox" hidden>
+  <button class="lightbox-close" id="lightboxClose" aria-label="Close">✕</button>
+  <img id="lightboxImg" src="" alt="" />
+</div>
+
+<!-- toast -->
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
