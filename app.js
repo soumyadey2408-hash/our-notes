@@ -10,6 +10,8 @@ const ROOM_KEY = "aurora-room-code";
 const LOCK_KEY = "aurora-lock-v1";
 const UNLOCK_SESSION_KEY = "aurora-unlocked";
 const LOCK_GRACE_MS = 30 * 1000; // re-ask for the PIN after being backgrounded this long
+const OWNER_NAMES_KEY = "aurora-owner-names";
+const OWNER_FILTER_KEY = "aurora-owner-filter";
 
 const COLORS = [
   { id: "none",     hex: "transparent" },
@@ -40,6 +42,8 @@ let firestoreUnsub = null;
 let db = null;
 
 let draftPhotos = []; // [{ id, dataUrl }] for the note currently open in the editor
+let draftOwner = null; // "a" | "b" | null (unassigned/shared) for the note in the editor
+let ownerFilter = localStorage.getItem(OWNER_FILTER_KEY) || "all"; // "all" | "a" | "b"
 let appStarted = false;
 let pinBuffer = "";
 let lockBackgroundTimer = null;
@@ -83,9 +87,22 @@ const bannerClose = document.getElementById("syncBannerClose");
 
 const toastEl = document.getElementById("toast");
 
+const lightbox = document.getElementById("lightbox");
+const lightboxImg = document.getElementById("lightboxImg");
+const lightboxClose = document.getElementById("lightboxClose");
+
 const photoStrip = document.getElementById("photoStrip");
 const addPhotoBtn = document.getElementById("addPhotoBtn");
 const photoInput = document.getElementById("photoInput");
+
+const ownerTabs = document.getElementById("ownerTabs");
+const ownerPicker = document.getElementById("ownerPicker");
+const namesBtn = document.getElementById("namesBtn");
+const namesModalScrim = document.getElementById("namesModalScrim");
+const ownerAInput = document.getElementById("ownerAInput");
+const ownerBInput = document.getElementById("ownerBInput");
+const cancelNamesBtn = document.getElementById("cancelNamesBtn");
+const saveNamesBtn = document.getElementById("saveNamesBtn");
 
 const lockDot = document.getElementById("lockDot");
 const lockSettingsBtn = document.getElementById("lockSettingsBtn");
@@ -158,6 +175,9 @@ function escapeHtml(str) {
 function visibleNotes() {
   const term = searchTerm.trim().toLowerCase();
   let list = notes.filter((n) => !n.deleted);
+  if (ownerFilter !== "all") {
+    list = list.filter((n) => n.owner === ownerFilter);
+  }
   if (term) {
     list = list.filter(
       (n) =>
@@ -197,7 +217,7 @@ function render() {
       card.innerHTML = `
         ${
           photos.length
-            ? `<div class="card-photos"><img src="${photos[0].dataUrl}" alt="" />${
+            ? `<div class="card-photos" data-action="preview" data-photo="0"><img src="${photos[0].dataUrl}" alt="" />${
                 photos.length > 1 ? `<span class="card-photos-count">+${photos.length - 1}</span>` : ""
               }</div>`
             : ""
@@ -221,6 +241,11 @@ function render() {
         if (e.target.closest('[data-action="delete"]')) {
           e.stopPropagation();
           removeNote(note.id);
+          return;
+        }
+        if (e.target.closest('[data-action="preview"]')) {
+          e.stopPropagation();
+          openLightbox(photos[0].dataUrl);
           return;
         }
         openEditor(note.id);
@@ -308,16 +333,35 @@ function renderPhotoStrip() {
   draftPhotos.forEach((p) => {
     const wrap = document.createElement("div");
     wrap.className = "photo-thumb";
-    wrap.innerHTML = `<img src="${p.dataUrl}" alt="" /><button type="button" class="photo-remove" data-id="${p.id}" aria-label="Remove photo">✕</button>`;
+    wrap.innerHTML = `<img src="${p.dataUrl}" alt="" data-action="preview" /><button type="button" class="photo-remove" data-id="${p.id}" aria-label="Remove photo">✕</button>`;
     photoStrip.appendChild(wrap);
   });
 }
 
 photoStrip.addEventListener("click", (e) => {
-  const btn = e.target.closest(".photo-remove");
-  if (!btn) return;
-  draftPhotos = draftPhotos.filter((p) => p.id !== btn.dataset.id);
-  renderPhotoStrip();
+  const removeBtn = e.target.closest(".photo-remove");
+  if (removeBtn) {
+    draftPhotos = draftPhotos.filter((p) => p.id !== removeBtn.dataset.id);
+    renderPhotoStrip();
+    return;
+  }
+  const img = e.target.closest('img[data-action="preview"]');
+  if (img) openLightbox(img.src);
+});
+
+// -- full-size photo lightbox --
+
+function openLightbox(dataUrl) {
+  lightboxImg.src = dataUrl;
+  lightbox.hidden = false;
+}
+function closeLightbox() {
+  lightbox.hidden = true;
+  lightboxImg.src = "";
+}
+lightboxClose.addEventListener("click", closeLightbox);
+lightbox.addEventListener("click", (e) => {
+  if (e.target === lightbox) closeLightbox();
 });
 
 addPhotoBtn.addEventListener("click", () => photoInput.click());
@@ -338,6 +382,75 @@ photoInput.addEventListener("change", async (e) => {
 });
 
 // ---------------------------------------------------------------
+// owner sections (Me / Them tabs + names)
+// ---------------------------------------------------------------
+
+function getOwnerNames() {
+  try {
+    const raw = localStorage.getItem(OWNER_NAMES_KEY);
+    return raw ? JSON.parse(raw) : { a: "Me", b: "Them" };
+  } catch {
+    return { a: "Me", b: "Them" };
+  }
+}
+
+function setOwnerNames(names) {
+  localStorage.setItem(OWNER_NAMES_KEY, JSON.stringify(names));
+}
+
+function applyOwnerNames() {
+  const names = getOwnerNames();
+  ownerTabs.querySelector('[data-owner="a"]').textContent = names.a;
+  ownerTabs.querySelector('[data-owner="b"]').textContent = names.b;
+  ownerPicker.querySelector('[data-owner="a"]').textContent = names.a;
+  ownerPicker.querySelector('[data-owner="b"]').textContent = names.b;
+}
+
+function setOwnerFilter(value) {
+  ownerFilter = value;
+  localStorage.setItem(OWNER_FILTER_KEY, value);
+  [...ownerTabs.children].forEach((btn) =>
+    btn.classList.toggle("active", btn.dataset.owner === value)
+  );
+  render();
+}
+
+ownerTabs.addEventListener("click", (e) => {
+  const btn = e.target.closest(".owner-tab");
+  if (!btn) return;
+  setOwnerFilter(btn.dataset.owner);
+});
+
+ownerPicker.addEventListener("click", (e) => {
+  const btn = e.target.closest(".owner-pill");
+  if (!btn) return;
+  draftOwner = draftOwner === btn.dataset.owner ? null : btn.dataset.owner;
+  [...ownerPicker.querySelectorAll(".owner-pill")].forEach((el) =>
+    el.classList.toggle("selected", el.dataset.owner === draftOwner)
+  );
+});
+
+namesBtn.addEventListener("click", () => {
+  const names = getOwnerNames();
+  ownerAInput.value = names.a;
+  ownerBInput.value = names.b;
+  namesModalScrim.hidden = false;
+  setTimeout(() => ownerAInput.focus(), 30);
+});
+cancelNamesBtn.addEventListener("click", () => (namesModalScrim.hidden = true));
+namesModalScrim.addEventListener("click", (e) => {
+  if (e.target === namesModalScrim) namesModalScrim.hidden = true;
+});
+saveNamesBtn.addEventListener("click", () => {
+  const a = ownerAInput.value.trim() || "Me";
+  const b = ownerBInput.value.trim() || "Them";
+  setOwnerNames({ a, b });
+  applyOwnerNames();
+  namesModalScrim.hidden = true;
+  showToast("Section names updated");
+});
+
+// ---------------------------------------------------------------
 // editor open/close
 // ---------------------------------------------------------------
 
@@ -351,6 +464,12 @@ function openEditor(noteId) {
   pinnedDraft = note ? !!note.pinned : false;
   draftPhotos = note && note.photos ? note.photos.map((p) => ({ ...p })) : [];
   renderPhotoStrip();
+
+  // New notes default to whichever section tab is currently active.
+  draftOwner = note ? note.owner || null : ownerFilter !== "all" ? ownerFilter : null;
+  [...ownerPicker.querySelectorAll(".owner-pill")].forEach((el) =>
+    el.classList.toggle("selected", el.dataset.owner === draftOwner)
+  );
 
   [...colorPicker.children].forEach((el) =>
     el.classList.toggle("selected", el.dataset.color === selectedColor)
@@ -366,6 +485,7 @@ function closeEditor() {
   modalScrim.hidden = true;
   activeNoteId = null;
   draftPhotos = [];
+  draftOwner = null;
 }
 
 function saveNote() {
@@ -384,6 +504,7 @@ function saveNote() {
     note.color = selectedColor;
     note.pinned = pinnedDraft;
     note.photos = draftPhotos;
+    note.owner = draftOwner;
     note.updatedAt = now;
     pushRemote(note);
     showToast("Note updated");
@@ -395,6 +516,7 @@ function saveNote() {
       color: selectedColor,
       pinned: pinnedDraft,
       photos: draftPhotos,
+      owner: draftOwner,
       createdAt: now,
       updatedAt: now,
     };
@@ -435,6 +557,7 @@ modalScrim.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
+    if (!lightbox.hidden) { closeLightbox(); return; }
     if (!modalScrim.hidden) closeEditor();
     if (!syncModalScrim.hidden) closeSyncModal();
   }
@@ -1029,6 +1152,10 @@ function init() {
   setInterval(applyTimePhase, 5 * 60 * 1000); // recheck every 5 min in case the app stays open
   paintStars();
   updateLockDot();
+  applyOwnerNames();
+  [...ownerTabs.children].forEach((btn) =>
+    btn.classList.toggle("active", btn.dataset.owner === ownerFilter)
+  );
 
   const cfg = getLockConfig();
   const alreadyUnlocked = sessionStorage.getItem(UNLOCK_SESSION_KEY) === "1";
